@@ -1,0 +1,46 @@
+name: graphcast-gencast-cuda12
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+
+  # Core compiled/security stack
+  - cryptography # cffi and openssl, due to mismatch on glibc
+  - cffi
+  - openssl
+  
+  # Geospatial / compiled stack via conda-forge (avoids pip build issues)
+  - cartopy
+  - rtree
+  - trimesh
+  - matplotlib
+  - dask
+  - numpy
+  - pandas
+  - scipy
+  - xarray
+  - netcdf4
+
+  # Common cartopy/rtree deps (usually pulled transitively, but keeping explicit is safer)
+  - shapely
+  - pyproj
+  - geos
+  - proj
+
+  - ipywidgets
+
+  - pip:
+      # JAX with NVIDIA GPU support using pip-provided CUDA/cuDNN wheels (recommended path)
+      - "jax[cuda12]"
+      - google-cloud-storage
+
+      # GraphCast deps from your setup.py
+      - chex
+      - colabtools
+      - dinosaur-dycore
+      - dm-haiku
+      - dm-tree
+      - jraph
+      - typing_extensions
+      - xarray_tensorstore
