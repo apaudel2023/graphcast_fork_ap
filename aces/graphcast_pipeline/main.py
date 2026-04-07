@@ -119,14 +119,16 @@ def run_single_forecast(gc_model, cfg, current_time, rollout_steps, output_root,
         gt_ds.to_netcdf(gt_path)
         logger.info(f"  Saved ground truth -> {gt_path}")
 
-    # Step 5: Crop (prediction always; ground truth only in forecast mode)
+    # Step 5: Crop
     if crop_enabled:
         logger.info("  Cropping prediction ...")
         crop_prediction(pred_path, cfg, logger)
-        # In verify mode, keep full resolution ground truth uncropped for analysis
-        # In forecast mode, crop ground truth too if it exists
-        if mode == "forecast" and gt_path is not None:
-            crop_prediction(gt_path, cfg, logger)
+
+        if mode == "forecast":
+            # Forecast mode: delete full-resolution file, keep only cropped
+            os.remove(pred_path)
+            logger.info(f"  Deleted full-resolution prediction: {pred_path}")
+        # Verify mode: keep both full-resolution and cropped
 
     # Step 6: Cleanup temp ERA5 files
     if cfg["run"]["cleanup_temp"]:

@@ -1,6 +1,11 @@
-# GraphCast Inference Pipeline
+# GraphCast Operational — Inference Pipeline
 
 Modular pipeline for running [GraphCast](https://github.com/google-deepmind/graphcast) weather forecasts on HPC, with optional verification against ERA5 reanalysis.
+
+> **Note:** This pipeline is built for the **GraphCast Operational** model variant:
+> `GraphCast_operational - ERA5-HRES 1979-2021 - resolution 0.25 - pressure levels 13 - mesh 2to6 - precipitation output only`
+>
+> Other GraphCast variants (e.g., GraphCast_small, GenCast) use different checkpoints, variable sets, and mesh configurations. Adapting this pipeline for other variants would require changes to the variable lists, checkpoint loading, and potentially the batch construction.
 
 ## What is GraphCast?
 
@@ -200,25 +205,27 @@ analysis:
 
 ### Forecast mode
 
+In forecast mode with cropping enabled, the full-resolution `.nc` is **deleted** after cropping to save disk space. Only the cropped file is kept.
+
 ```
 GRAPHCAST_OUTPUTS/
   2024_01_01_2024_01_15/                    # one dir per period
     logs/
       slurm_run_12345_period1.log
-    graphcast_2024_01_01.nc                 # full resolution
-    graphcast_2024_01_01_cropped.nc         # cropped to regional domain
-    graphcast_2024_01_02.nc
+    graphcast_2024_01_01_cropped.nc         # cropped (full-res deleted after crop)
     graphcast_2024_01_02_cropped.nc
     ...
 ```
 
 ### Verify mode
 
+In verify mode, **both** full-resolution and cropped prediction files are kept. Ground truth is always saved at full resolution.
+
 ```
 GRAPHCAST_OUTPUTS/
   verify_20240101_00/
     logs/
-    graphcast_2024_01_01.nc                 # full resolution prediction
+    graphcast_2024_01_01.nc                 # full resolution prediction (kept)
     graphcast_2024_01_01_cropped.nc         # cropped prediction
     ground_truth_2024_01_01.nc              # full resolution ERA5 ground truth
     analysis/
@@ -317,8 +324,17 @@ Side-by-side plot showing the global prediction with a **red rectangle** marking
 
 ## Requirements
 
+See [`aces/requirements.yaml`](../requirements.yaml) for the full conda environment specification.
+
+Key dependencies:
 - Python 3.10+
 - JAX with GPU support (`jax[cuda12]`)
-- GraphCast dependencies (see `setup.py` in repo root)
+- GraphCast dependencies (`dm-haiku`, `chex`, `jraph`, etc. — see `setup.py` in repo root)
 - CDS API credentials configured (`~/.cdsapirc`)
-- Additional: `matplotlib`, `pandas`, `Pillow`, `pyyaml`
+- `matplotlib`, `pandas`, `Pillow` (PIL), `pyyaml`, `xarray`, `netcdf4`
+
+### Environment setup (HPC)
+
+```bash
+conda env create -f aces/requirements.yaml -n env_graphcast
+```
