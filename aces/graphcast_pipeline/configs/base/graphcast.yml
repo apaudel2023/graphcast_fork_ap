@@ -1,0 +1,45 @@
+run:
+  mode: "forecast"              # "forecast" or "verify"
+  reinit_interval_hours: 24
+  cleanup_temp: true
+
+model:
+  ckpt_path: "/raid/apaudel/graphcast/params/GraphCast_operational - ERA5-HRES 1979-2021 - resolution 0.25 - pressure levels 13 - mesh 2to6 - precipitation output only.npz"
+  stats_dir: "/raid/apaudel/graphcast/stats/"
+
+era5:
+  variables:
+    surface:
+      - "2m_temperature"
+      - "mean_sea_level_pressure"
+      - "10m_u_component_of_wind"
+      - "10m_v_component_of_wind"
+    pressure:
+      - "geopotential"
+      - "specific_humidity"
+      - "temperature"
+      - "u_component_of_wind"
+      - "v_component_of_wind"
+      - "vertical_velocity"
+    static:
+      - "geopotential"
+      - "land_sea_mask"
+  pressure_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+
+crop:
+  enabled: true
+  center_lat: 39.2
+  center_lon: -76.3
+  window_size: 60
+
+analysis:
+  enabled: false                # only used when mode=verify
+  metrics: true                 # save metrics CSV
+  plots: true                   # generate comparison plots + error evolution
+  animations: true              # create GIF animations
+  levels: null                  # null = all levels; or list like [500, 850]
+  fps: 2                        # GIF frame rate
+  cmap: "viridis"               # colormap for truth/prediction panels
+  residual_cmap: "RdBu_r"       # diverging colormap for residual panel
+
+output_dir: "/raid/apaudel/GRAPHCAST_OUTPUTS"

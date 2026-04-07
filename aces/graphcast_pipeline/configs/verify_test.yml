@@ -1,0 +1,23 @@
+# verify_test.yml — single forecast verification with analysis
+#
+# Usage:
+#   sbatch submit.sh --config verify_test.yml
+#   python main.py --config verify_test.yml
+
+run:
+  mode: "verify"
+
+verification:
+  init_time: "2024-01-01 00:00"
+  rollout_steps: 4                   # 4 x 6h = 24h
+
+analysis:
+  enabled: true
+  metrics: true
+  plots: true
+  animations: true
+  crop_preview: true                 # side-by-side global vs cropped with red box
+  levels: null                       # null = all levels for metrics; plots use 1 per level
+  fps: 2
+  cmap: "viridis"
+  residual_cmap: "RdBu_r"
