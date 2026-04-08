@@ -160,14 +160,39 @@ def run_single_forecast(gc_model, cfg, current_time, rollout_steps, output_root,
 # ---------------------------------------------------------------------------
 
 def parse_init_time(init_time_str):
-    """Parse init_time from config. Supports 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM'.
-    Date-only defaults to 00:00 UTC.
+    """Parse init_time from config.
+
+    Two formats with different semantics:
+
+    - "YYYY-MM-DD" (date only):
+        Predictions START at 00Z of this day.
+        ERA5 inputs: previous day 12Z and 18Z.
+        Example: "2024-01-01" with 4 steps → predictions [00Z, 06Z, 12Z, 18Z]
+
+    - "YYYY-MM-DD HH:MM" (date + hour):
+        The specified hour is the INITIALIZATION POINT (last model input).
+        Predictions start 6h AFTER the specified hour.
+        ERA5 inputs: specified_hour - 6h and specified_hour.
+        Example: "2024-01-01 00:00" with 4 steps → predictions [06Z, 12Z, 18Z, Jan 2 00Z]
+
+    Returns the internal init_time used by the pipeline.
     """
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(init_time_str, fmt)
-        except ValueError:
-            continue
+    # Try date+hour format first
+    try:
+        user_time = datetime.strptime(init_time_str, "%Y-%m-%d %H:%M")
+        # User specified an hour = the initialization point (last input).
+        # Shift forward by 6h so the pipeline produces predictions starting
+        # 6h after the user's specified hour.
+        return user_time + timedelta(hours=6)
+    except ValueError:
+        pass
+
+    # Date-only format
+    try:
+        return datetime.strptime(init_time_str, "%Y-%m-%d")
+    except ValueError:
+        pass
+
     raise ValueError(
         f"Invalid init_time '{init_time_str}'. "
         f"Expected format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM'"
@@ -177,10 +202,13 @@ def parse_init_time(init_time_str):
 def run_verify(gc_model, cfg, tag, output_dir):
     """Single-forecast verification with ground truth comparison and analysis."""
     v_cfg = cfg["verification"]
-    init_time = parse_init_time(v_cfg["init_time"])
+    init_time_str = v_cfg["init_time"]
+    init_time = parse_init_time(init_time_str)
     rollout_steps = v_cfg["rollout_steps"]
 
-    verify_dir = os.path.join(output_dir, f"verify_{init_time.strftime('%Y%m%d_%H')}")
+    # Use user-provided string for directory naming (not the shifted internal time)
+    dir_tag = init_time_str.replace(" ", "_").replace(":", "").replace("-", "")
+    verify_dir = os.path.join(output_dir, f"verify_{dir_tag}")
     ensure_dir(verify_dir)
 
     log_dir = os.path.join(verify_dir, "logs")
@@ -188,11 +216,18 @@ def run_verify(gc_model, cfg, tag, output_dir):
     logger = setup_logger(log_dir, tag=f"{tag}_verify")
     log_config(logger, cfg, header="Verification configuration")
 
+    last_input_time = init_time - timedelta(hours=6)
+    first_pred_time = last_input_time + timedelta(hours=6)
+    last_pred_time = last_input_time + timedelta(hours=rollout_steps * 6)
+
     logger.info("=" * 80)
     logger.info(f"Verification mode")
-    logger.info(f"  init_time:     {init_time}")
-    logger.info(f"  rollout_steps: {rollout_steps} ({rollout_steps * 6}h)")
-    logger.info(f"  crop:          {cfg['crop']['enabled']}")
+    logger.info(f"  config init_time:  {init_time_str}")
+    logger.info(f"  ERA5 input 1:      {init_time - timedelta(hours=12)}")
+    logger.info(f"  ERA5 input 2:      {last_input_time}")
+    logger.info(f"  rollout_steps:     {rollout_steps} ({rollout_steps * 6}h)")
+    logger.info(f"  prediction range:  {first_pred_time} to {last_pred_time}")
+    logger.info(f"  crop:              {cfg['crop']['enabled']}")
     logger.info("=" * 80)
 
     # Run the forecast

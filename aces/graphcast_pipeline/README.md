@@ -176,13 +176,30 @@ run:
   mode: "verify"
 
 verification:
-  init_time: "2024-01-01 00:00"
-  rollout_steps: 4               # 4 x 6h = 24h
+  init_time: "2024-01-01"      # date only or date + hour (see below)
+  rollout_steps: 4              # 4 x 6h = 24h
 
 analysis:
   enabled: true
   crop_preview: true
 ```
+
+### `init_time` format — important
+
+The `init_time` field in verification config supports two formats with **different semantics**:
+
+| Format | Meaning | ERA5 inputs | Predictions (4 steps) |
+|--------|---------|-------------|----------------------|
+| `"2024-01-01"` | Predictions **for this day** starting at 00Z | Dec 31 12Z, 18Z | Jan 1 **00Z**, 06Z, 12Z, 18Z |
+| `"2024-01-01 00:00"` | **Initialize at 00Z** (00Z is the last input) | Dec 31 18Z, Jan 1 00Z | Jan 1 **06Z**, 12Z, 18Z, Jan 2 00Z |
+
+- **Date only** (`"YYYY-MM-DD"`): the date specifies the start of the prediction period. Predictions begin at 00Z of that day.
+- **Date + hour** (`"YYYY-MM-DD HH:MM"`): the specified hour is the **initialization point** — the model "sees" ERA5 data up to and including this hour. Predictions start 6 hours after.
+
+### Rollout steps
+
+- **Verify mode**: uses `rollout_steps` directly from the config.
+- **Forecast mode**: computes `rollout_steps = reinit_interval_hours / 6`. With the default `reinit_interval_hours: 24`, each day gets 4 rollout steps (24h).
 
 ### Key config options
 
