@@ -121,7 +121,8 @@ class GraphCastAnalysis:
                         lead_h = int(time_val / np.timedelta64(1, "h"))
                         valid_str = f"+{lead_h}h"
                     else:
-                        lead_h = (i + 1) * 6
+                        # Hours offset from first prediction
+                        lead_h = int((time_val - self._shared_times[0]) / np.timedelta64(1, "h"))
                         valid_str = str(np.datetime_as_string(time_val, unit="h"))
 
                     rows.append({
@@ -216,14 +217,21 @@ class GraphCastAnalysis:
         return variable
 
     def _get_step_label(self, time_val, step_idx):
+        """Build display string and file-safe suffix from the time coordinate value.
+
+        Uses the actual time stored in the .nc file — no lead-hour computation needed.
+        """
         if np.issubdtype(type(time_val), np.timedelta64):
+            # Timedelta (e.g. from notebook usage before saving)
             lead_h = int(time_val / np.timedelta64(1, "h"))
             valid_str = f"+{lead_h}h"
+            file_suffix = f"step_{step_idx+1:02d}_{lead_h:+04d}h"
         else:
-            lead_h = (step_idx + 1) * 6
-            valid_str = str(np.datetime_as_string(time_val, unit="h"))
-        file_suffix = f"step_{step_idx+1:02d}_{lead_h:+04d}h"
-        return lead_h, valid_str, file_suffix
+            # Absolute datetime from saved .nc files
+            dt_str = str(np.datetime_as_string(time_val, unit="h"))  # "2024-01-01T00"
+            valid_str = dt_str
+            file_suffix = f"step_{step_idx+1:02d}_{dt_str}"  # "step_01_2024-01-01T00"
+        return valid_str, file_suffix
 
     def plot_comparison(self, variable, level=None, step=0, cmap=None, residual_cmap=None):
         cmap = cmap or self.cmap
@@ -246,7 +254,7 @@ class GraphCastAnalysis:
         truth_step = truth.sel(time=time_val).values
         residual_step = pred_step - truth_step
 
-        lead_h, valid_str, file_suffix = self._get_step_label(time_val, step)
+        valid_str, file_suffix = self._get_step_label(time_val, step)
         title_base = self._var_dir_name(variable, level)
 
         key = (variable, int(level) if level is not None else None)
