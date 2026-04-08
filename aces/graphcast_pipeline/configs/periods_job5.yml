@@ -1,0 +1,17 @@
+# periods_job5.yml
+run_periods:
+  period1:
+    start: "2015-08-01"
+    end: "2015-08-15"
+  period2:
+    start: "2015-09-01"
+    end: "2015-09-15"
+  period3:
+    start: "2015-10-01"
+    end: "2015-10-15"
+  period4:
+    start: "2015-11-01"
+    end: "2015-11-15"
+  period5:
+    start: "2015-12-01"
+    end: "2015-12-15"

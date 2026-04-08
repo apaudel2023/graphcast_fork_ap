@@ -1,0 +1,8 @@
+# test_periods_job.yml
+run_periods:
+  test1:
+    start: "2014-01-01"
+    end: "2014-01-01"
+  test2:
+    start: "2014-02-01"
+    end: "2014-02-02"

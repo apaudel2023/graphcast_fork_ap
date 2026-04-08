@@ -12,7 +12,7 @@ verification:
   # Formats: "YYYY-MM-DD" (defaults to 00Z) or "YYYY-MM-DD HH:MM"
   # ERA5 inputs are automatically fetched for t-12h and t-6h before init_time.
   init_time: "2024-01-01"
-  rollout_steps: 4                   # 4 x 6h = 24h
+  rollout_steps: 40                   # 4 x 6h = 24h
 
 analysis:
   enabled: true
@@ -20,8 +20,8 @@ analysis:
   plots: true
   animations: true
   crop_preview: true                 # side-by-side global vs cropped with red box
-  levels: [500]                      # just one level for quick test; null = all
-  fps: 2
+  levels: null                    # just one level for quick test; null = all, [500]
+  fps: 3
   cmap: "viridis"
   residual_cmap: "RdBu_r"
 
