@@ -47,9 +47,15 @@ from analysis import GraphCastAnalysis
 
 
 def save_predictions(predictions, init_time, output_path, logger):
-    """Save predictions with absolute datetime time coordinates."""
+    """Save predictions with absolute datetime time coordinates.
+
+    Prediction lead times [6h, 12h, ...] are relative to the last input timestep
+    (init_time - 6h). So absolute = (init_time - 6h) + lead_time.
+    For init_time=2024-01-01 00Z with 4 steps: [00Z, 06Z, 12Z, 18Z].
+    """
+    last_input_time = init_time - timedelta(hours=6)
     abs_times = np.array([
-        np.datetime64(init_time, "ns") + td
+        np.datetime64(last_input_time, "ns") + td
         for td in predictions.coords["time"].values
     ])
     ds = predictions.copy()
@@ -60,7 +66,9 @@ def save_predictions(predictions, init_time, output_path, logger):
 
     ds.to_netcdf(output_path)
     logger.info(f"  Saved predictions -> {output_path}")
-    logger.info(f"    time: {ds.coords['time'].values[[0, -1]]}")
+    logger.info(f"    time range: {ds.coords['time'].values[0]} to {ds.coords['time'].values[-1]}")
+    logger.info(f"    variables:  {sorted(ds.data_vars)}")
+    logger.info(f"    shape:      {dict(ds.sizes)}")
 
 
 def run_single_forecast(gc_model, cfg, current_time, rollout_steps, output_root, logger):
@@ -73,7 +81,17 @@ def run_single_forecast(gc_model, cfg, current_time, rollout_steps, output_root,
     crop_enabled = cfg["crop"]["enabled"]
 
     era5_input_times = get_era5_input_times(current_time)
-    logger.info(f"  ERA5 inputs: {era5_input_times[0]} and {era5_input_times[1]}")
+    last_input_time = current_time - timedelta(hours=6)
+    first_pred_time = current_time  # last_input + 6h = init_time
+    last_pred_time = current_time + timedelta(hours=(rollout_steps - 1) * 6)
+
+    logger.info(f"  init_time:       {current_time}")
+    logger.info(f"  ERA5 input 1:    {era5_input_times[0]}")
+    logger.info(f"  ERA5 input 2:    {era5_input_times[1]}")
+    logger.info(f"  rollout_steps:   {rollout_steps} x 6h = {rollout_steps * 6}h")
+    logger.info(f"  prediction range: {first_pred_time} to {last_pred_time}")
+    logger.info(f"  mode:            {mode}")
+    logger.info(f"  crop:            {crop_enabled}")
 
     ts_tag = current_time.strftime("%Y%m%d_%H")
     era5_dir = os.path.join(output_root, f"era5_tmp_{ts_tag}")
@@ -141,10 +159,25 @@ def run_single_forecast(gc_model, cfg, current_time, rollout_steps, output_root,
 # Verify mode
 # ---------------------------------------------------------------------------
 
+def parse_init_time(init_time_str):
+    """Parse init_time from config. Supports 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM'.
+    Date-only defaults to 00:00 UTC.
+    """
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(init_time_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Invalid init_time '{init_time_str}'. "
+        f"Expected format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM'"
+    )
+
+
 def run_verify(gc_model, cfg, tag, output_dir):
     """Single-forecast verification with ground truth comparison and analysis."""
     v_cfg = cfg["verification"]
-    init_time = datetime.strptime(v_cfg["init_time"], "%Y-%m-%d %H:%M")
+    init_time = parse_init_time(v_cfg["init_time"])
     rollout_steps = v_cfg["rollout_steps"]
 
     verify_dir = os.path.join(output_dir, f"verify_{init_time.strftime('%Y%m%d_%H')}")
