@@ -20,7 +20,9 @@ analysis:
   plots: true
   animations: true
   crop_preview: true                 # side-by-side global vs cropped with red box
-  levels: null                       # null = all levels
+  levels: [500]                      # just one level for quick test; null = all
   fps: 2
   cmap: "viridis"
   residual_cmap: "RdBu_r"
+
+output_dir: "./GRAPHCAST_TEST_OUTPUTS"
