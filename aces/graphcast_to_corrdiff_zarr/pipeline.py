@@ -391,7 +391,10 @@ def add_wrf_fields(ds: xr.Dataset, base_path: Path, use_real: bool, logger: logg
 # Main
 # =============================================================
 def run_pipeline(cfg: dict):
-    logger = setup_logger(Path("./log"), "graphcast_to_zarr")
+    # Write logs next to the output Zarr store (alongside, not inside)
+    out_path = cfg["paths"]["zarr_output_path"]
+    log_dir = out_path.parent / f"{out_path.stem}_logs"
+    logger = setup_logger(log_dir, "graphcast_to_zarr")
     try:
         logger.info("Starting GraphCast -> Zarr packaging pipeline")
         for k, v in cfg["paths"].items():
@@ -407,7 +410,6 @@ def run_pipeline(cfg: dict):
             logger=logger,
         )
 
-        out_path = cfg["paths"]["zarr_output_path"]
         if out_path.exists():
             logger.info(f"Removing existing Zarr store {out_path}")
             shutil.rmtree(out_path)
