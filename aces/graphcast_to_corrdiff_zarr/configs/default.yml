@@ -1,0 +1,51 @@
+# =============================================================
+# GraphCast -> CorrDiff Zarr packaging pipeline config
+# =============================================================
+
+paths:
+  # Directory (recursively globbed) containing GraphCast prediction .nc files
+  graphcast_nc_dir: /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/RAW_OUTPUTS/2014-2015
+  # Base CorrDiff Zarr (source of WRF grid + normalization statics + real WRF)
+  base_zarr_path:  /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr
+  # Output Zarr store
+  zarr_output_path: /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr
+
+zarr:
+  write_mode: w              # "w" overwrite, "a" append (overwrite handled by explicit shutil.rmtree)
+  time_chunk: 1
+
+# Spatial handling
+regrid:
+  enabled: true              # in-memory xESMF regrid to WRF grid from base_zarr
+  method: bilinear           # bilinear | nearest_s2d | conservative
+  wrf_ref_file: null         # optional external WRF geo_em file; null -> use base_zarr XLAT/XLONG
+
+resize:
+  enabled: false             # fallback linear interp (only if regrid.enabled=false)
+  target_shape: [112, 112]
+
+wrf:
+  use_real: true             # true: copy real wrf from base_zarr for matching times; false: dummy
+
+# GraphCast output variable -> CorrDiff/ERA5 short name
+var_map:
+  "2m_temperature":            t2m
+  "10m_u_component_of_wind":   u10
+  "10m_v_component_of_wind":   v10
+  "mean_sea_level_pressure":   msl
+  "temperature":               t
+  "u_component_of_wind":       u
+  "v_component_of_wind":       v
+  "specific_humidity":         q
+  "geopotential":              z_pl
+
+# Pressure-level channels written to the Zarr (indices into the `level` dim
+# of the GraphCast output, in ascending order as they appear).
+var_era5_pressure:
+  - {name: t,    pressure_levels: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+  - {name: u,    pressure_levels: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+  - {name: v,    pressure_levels: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+  - {name: q,    pressure_levels: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+  - {name: z_pl, pressure_levels: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+
+var_era5_surface: [t2m, u10, v10]
