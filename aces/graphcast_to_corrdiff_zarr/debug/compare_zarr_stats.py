@@ -1,7 +1,8 @@
 """
-Side-by-side per-channel statistics across three Zarrs:
+Side-by-side per-channel statistics across up to four Zarrs:
 
   base   — the CorrDiff training Zarr (real ERA5 + WRF; all samples)
+  aurora — Aurora-output Zarr packaged for CorrDiff (optional)
   zarr1  — old packaged GraphCast Zarr (suspected buggy)
   zarr2  — new packaged GraphCast Zarr (after the level-pairing fix)
 
@@ -211,7 +212,11 @@ def print_table(title: str, labels: list[str], cols: list[tuple[str, np.ndarray 
 # Main
 # ---------------------------------------------------------------------------
 def _run(args):
-    paths = [("base", args.base_zarr), ("zarr1", args.zarr1), ("zarr2", args.zarr2)]
+    # Column order: base, aurora (optional), zarr1, zarr2.
+    paths = [("base", args.base_zarr)]
+    if args.aurora_zarr is not None:
+        paths.append(("aurora", args.aurora_zarr))
+    paths.extend([("zarr1", args.zarr1), ("zarr2", args.zarr2)])
 
     # Labels: take from the base Zarr (it has the canonical *_variable / *_pressure coords).
     era5_labels = _decode_labels(args.base_zarr, "era5")
@@ -220,44 +225,31 @@ def _run(args):
     era5_stats = {name: compute_stats(p, "era5") for name, p in paths}
     wrf_stats  = {name: compute_stats(p, "wrf")  for name, p in paths}
 
+    def cols_for(stats_dict, key):
+        return [
+            (name, stats_dict[name][key] if stats_dict[name]["present"] else None)
+            for name, _ in paths
+        ]
+
     print_table(
         "ERA5 CENTER  (per-channel mean of `era5` over all samples)",
         era5_labels,
-        cols=[
-            ("base",  era5_stats["base"]["mean"]  if era5_stats["base"]["present"]  else None),
-            ("zarr1", era5_stats["zarr1"]["mean"] if era5_stats["zarr1"]["present"] else None),
-            ("zarr2", era5_stats["zarr2"]["mean"] if era5_stats["zarr2"]["present"] else None),
-        ],
+        cols=cols_for(era5_stats, "mean"),
     )
-
     print_table(
         "ERA5 SCALE  (per-channel std of `era5` over all samples)",
         era5_labels,
-        cols=[
-            ("base",  era5_stats["base"]["std"]  if era5_stats["base"]["present"]  else None),
-            ("zarr1", era5_stats["zarr1"]["std"] if era5_stats["zarr1"]["present"] else None),
-            ("zarr2", era5_stats["zarr2"]["std"] if era5_stats["zarr2"]["present"] else None),
-        ],
+        cols=cols_for(era5_stats, "std"),
     )
-
     print_table(
         "WRF CENTER  (per-channel mean of `wrf` over all samples)",
         wrf_labels,
-        cols=[
-            ("base",  wrf_stats["base"]["mean"]  if wrf_stats["base"]["present"]  else None),
-            ("zarr1", wrf_stats["zarr1"]["mean"] if wrf_stats["zarr1"]["present"] else None),
-            ("zarr2", wrf_stats["zarr2"]["mean"] if wrf_stats["zarr2"]["present"] else None),
-        ],
+        cols=cols_for(wrf_stats, "mean"),
     )
-
     print_table(
         "WRF SCALE  (per-channel std of `wrf` over all samples)",
         wrf_labels,
-        cols=[
-            ("base",  wrf_stats["base"]["std"]  if wrf_stats["base"]["present"]  else None),
-            ("zarr1", wrf_stats["zarr1"]["std"] if wrf_stats["zarr1"]["present"] else None),
-            ("zarr2", wrf_stats["zarr2"]["std"] if wrf_stats["zarr2"]["present"] else None),
-        ],
+        cols=cols_for(wrf_stats, "std"),
     )
 
     header("Notes on interpretation")
@@ -276,9 +268,11 @@ def _run(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("--base-zarr",  required=True, type=Path, help="Base CorrDiff Zarr (real ERA5+WRF)")
-    p.add_argument("--zarr1",      required=True, type=Path, help="First packaged Zarr to compare (e.g. buggy v1)")
-    p.add_argument("--zarr2",      required=True, type=Path, help="Second packaged Zarr to compare (e.g. fixed v2)")
+    p.add_argument("--base-zarr",   required=True, type=Path, help="Base CorrDiff Zarr (real ERA5+WRF)")
+    p.add_argument("--aurora-zarr", required=False, type=Path, default=None,
+                   help="Optional: Aurora-output Zarr (inserted as the second column, after base)")
+    p.add_argument("--zarr1",       required=True, type=Path, help="First packaged Zarr to compare (e.g. buggy v1)")
+    p.add_argument("--zarr2",       required=True, type=Path, help="Second packaged Zarr to compare (e.g. fixed v2)")
     p.add_argument("--output", required=False, type=Path, default=None,
                    help="Path to save the report. Default: "
                         "compare_zarr_stats_<timestamp>.txt next to this script. "

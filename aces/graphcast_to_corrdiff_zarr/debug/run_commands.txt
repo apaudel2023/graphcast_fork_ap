@@ -82,9 +82,10 @@ block. WRF tables should also match (WRF data is grafted from base).
 
 crun.python3 -p ~/envs/wrf-python python \
     /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/compare_zarr_stats.py \
-    --base-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr \
-    --zarr1     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr \
-    --zarr2     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015_v2.zarr
+    --base-zarr   /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr \
+    --aurora-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/AURORA/ZARR_FOR_CORRDIFF/aurora_2014_2015.zarr \
+    --zarr1       /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr \
+    --zarr2       /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015_v2.zarr
 
 
 ------------------------------------------------------------------------------
