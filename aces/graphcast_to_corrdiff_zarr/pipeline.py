@@ -161,20 +161,41 @@ def regrid_spatial(ds: xr.Dataset, base_path: Path, method: str, logger: logging
 # =============================================================
 # Variable extraction (layout-driven, label-based; asserts everything)
 # =============================================================
-def read_target_channel_layout(base_zarr_path: Path, logger: logging.Logger) -> List[dict]:
+# Variable names that are intrinsically single-level (no vertical dim).
+# Source-of-truth for surface detection; the era5_pressure value alone is
+# unreliable because the base Zarr may store it as an INDEX (with 0/NaN for
+# the first index) rather than an actual hPa value.
+SURFACE_VARS = {"t2m", "u10", "v10", "msl", "tp", "sp", "tcwv", "skt"}
+
+
+def read_target_channel_layout(
+    base_zarr_path: Path,
+    gc_levels: List[int],
+    logger: logging.Logger,
+) -> List[dict]:
     """Derive the canonical channel layout from the base CorrDiff Zarr.
 
     Returns a list of length n_channels, where each entry is:
         {"idx": <int>, "name": <str>, "pressure": <float hPa> or None}
 
-    Surface channels have pressure=None. Pressure-level channels carry the
-    real hPa value, so downstream selection can use label-based .sel(level=p)
-    and is immune to whatever order the GraphCast output happens to store
-    its `level` coord in.
+    Surface channels have pressure=None and are identified by variable name
+    (SURFACE_VARS). Pressure-level channels carry an actual hPa value so
+    downstream selection can use label-based .sel(level=p) and is immune to
+    the order in which the GraphCast output stores its `level` coord.
 
-    The base Zarr is treated as the source of truth: the packaged Zarr's
-    channel i MUST hold the variable/pressure declared by the base Zarr at
-    channel i (because era5_center[i], era5_scale[i] are computed for that).
+    Handles two conventions for `era5_pressure`:
+      1. Actual hPa values (50..1000).
+      2. Indices 0..N-1 into the level dim of whatever array was used to
+         build the base Zarr. Indices are interpreted as positions in a
+         DESCENDING-pressure list (1000, 925, ..., 50) because that's the
+         convention the existing base Zarr was built with — confirmed via
+         the diagnostic compare_channel_stats.py run.
+
+    The convention is auto-detected: if non-surface era5_pressure values are
+    all < 20 they are treated as indices; otherwise as hPa.
+
+    `gc_levels` is the GraphCast file's actual level coord values (e.g.
+    [50, 100, ..., 1000]). It is reversed to drive the index→hPa mapping.
     """
     base = xr.open_zarr(base_zarr_path, consolidated=False)
     try:
@@ -186,32 +207,55 @@ def read_target_channel_layout(base_zarr_path: Path, logger: logging.Logger) -> 
         vars_per_ch = [str(v) for v in base["era5_variable"].values]
 
         if "era5_pressure" in base.coords:
-            press_raw = base["era5_pressure"].values
+            press_raw = np.asarray(base["era5_pressure"].values, dtype=float)
         else:
             logger.warning("Base Zarr has no 'era5_pressure' coord — assuming all surface.")
-            press_raw = [None] * len(vars_per_ch)
-
-        n = len(vars_per_ch)
-        assert len(press_raw) == n, (
-            f"era5_variable ({n}) and era5_pressure ({len(press_raw)}) length mismatch"
-        )
-
-        layout: List[dict] = []
-        for i, (vname, p) in enumerate(zip(vars_per_ch, press_raw)):
-            # Determine surface vs pressure-level from the pressure value:
-            # NaN / 0 / None → surface; any positive finite value → pressure-level.
-            is_surface = (
-                p is None
-                or (isinstance(p, float) and (np.isnan(p) or p <= 0))
-                or (hasattr(p, "item") and (np.isnan(float(p)) or float(p) <= 0))
-            )
-            layout.append({
-                "idx": i,
-                "name": vname,
-                "pressure": None if is_surface else float(p),
-            })
+            press_raw = np.full(len(vars_per_ch), np.nan)
     finally:
         base.close()
+
+    n = len(vars_per_ch)
+    assert press_raw.size == n, (
+        f"era5_variable ({n}) and era5_pressure ({press_raw.size}) length mismatch"
+    )
+
+    # Decide: indices or hPa?
+    nonsurf_finite = [
+        float(p) for v, p in zip(vars_per_ch, press_raw)
+        if v not in SURFACE_VARS and np.isfinite(p)
+    ]
+    looks_like_indices = bool(nonsurf_finite) and max(nonsurf_finite) < 20.0
+
+    desc_levels = sorted(int(v) for v in gc_levels)[::-1]  # e.g. [1000, 925, ..., 50]
+
+    if looks_like_indices:
+        logger.info(
+            f"Base Zarr era5_pressure looks like LEVEL INDICES "
+            f"(max non-surface value = {max(nonsurf_finite):.0f}); "
+            f"mapping to DESCENDING GraphCast levels: {desc_levels}"
+        )
+    else:
+        logger.info("Base Zarr era5_pressure looks like actual hPa values.")
+
+    layout: List[dict] = []
+    for i, (vname, p) in enumerate(zip(vars_per_ch, press_raw)):
+        if vname in SURFACE_VARS:
+            hpa = None
+        else:
+            assert np.isfinite(p), (
+                f"Channel {i}: variable {vname!r} is pressure-level but "
+                f"era5_pressure is NaN/missing."
+            )
+            if looks_like_indices:
+                idx = int(round(float(p)))
+                assert 0 <= idx < len(desc_levels), (
+                    f"Channel {i} ({vname!r}): era5_pressure index {idx} out of range "
+                    f"[0, {len(desc_levels)-1}] for {len(desc_levels)} GraphCast levels"
+                )
+                hpa = float(desc_levels[idx])
+            else:
+                hpa = float(p)
+        layout.append({"idx": i, "name": vname, "pressure": hpa})
 
     logger.info(f"Target channel layout from base Zarr ({len(layout)} channels):")
     for ch in layout:
@@ -315,8 +359,19 @@ def build_clean_graphcast_dataset(cfg: dict, nc_files: List[Path], logger: loggi
     # This eliminates positional-isel level-flip bugs: we ALWAYS select by
     # variable name + hPa label, never by index, and we always emit channels
     # in the exact order the base Zarr's era5_center / era5_scale expect.
+    #
+    # Need the GraphCast level coord up-front because the base Zarr may store
+    # era5_pressure as level INDICES rather than actual hPa values; in that
+    # case we map indices to hPa via the GraphCast level array (descending).
+    logger.info(f"Reading level coord from first file: {nc_files[0].name}")
+    with xr.open_dataset(nc_files[0]) as _ds0:
+        if "level" not in _ds0.coords:
+            raise ValueError(f"First nc file {nc_files[0]} has no 'level' coord")
+        gc_levels = [int(v) for v in _ds0["level"].values]
+    logger.info(f"GraphCast levels: {sorted(gc_levels)}")
+
     logger.info("Reading canonical channel layout from base Zarr ...")
-    layout = read_target_channel_layout(base_path, logger)
+    layout = read_target_channel_layout(base_path, gc_levels, logger)
     expected_n_channels = len(layout)
 
     for f in tqdm(nc_files, desc="[Reading GraphCast outputs]"):
