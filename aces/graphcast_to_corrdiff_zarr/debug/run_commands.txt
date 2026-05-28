@@ -69,6 +69,25 @@ crun.python3 -p ~/envs/wrf-python python \
 
 
 ------------------------------------------------------------------------------
+Case 5 — Three-way center/scale comparison: base vs zarr_v1 vs zarr_v2
+------------------------------------------------------------------------------
+Computes per-channel mean (center) and std (scale) on both era5 and wrf for
+all three Zarrs. Four tables printed: era5 center, era5 scale, wrf center,
+wrf scale. No time filtering — uses every sample in each store. 'match?'
+column compares base vs zarr_v2 with 10% relative tolerance.
+
+If the v2 packaging fix worked, era5 base vs zarr_v2 should match channel-
+by-channel; zarr_v1 (buggy) should show a mirror pattern within each var
+block. WRF tables should also match (WRF data is grafted from base).
+
+crun.python3 -p ~/envs/wrf-python python \
+    /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/compare_zarr_stats.py \
+    --base-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr \
+    --zarr1     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr \
+    --zarr2     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015_v2.zarr
+
+
+------------------------------------------------------------------------------
 Custom output filename
 ------------------------------------------------------------------------------
 crun.python3 -p ~/envs/wrf-python python \
