@@ -1,0 +1,79 @@
+==============================================================================
+HPC run commands for check_channel_alignment.py  (Wahab / wrf-python env)
+==============================================================================
+
+By default the report is auto-saved next to the script:
+    aces/graphcast_to_corrdiff_zarr/debug/channel_alignment_report_<YYYYMMDD_HHMMSS>.txt
+
+Reports from different runs live side-by-side and never overwrite each other.
+Override with --output PATH, or pass --output '' to print only.
+
+Note on inputs:
+- The forecast-mode pipeline deletes the full-resolution prediction after
+  cropping, so RAW_OUTPUTS/2014-2015/ contains ONLY *_cropped.nc files.
+  That is also what graphcast_to_corrdiff_zarr/pipeline.py consumes.
+- Period dirs are 15-day chunks: 2014_01_01_2014_01_15, 2014_02_01_2014_02_15, ...
+- Files inside are named graphcast_YYYY_MM_DD_cropped.nc.
+
+
+------------------------------------------------------------------------------
+Case 1 — Minimal check (no packaged Zarr; quickest diagnostic)
+------------------------------------------------------------------------------
+Inspects GraphCast level order + base Zarr channel layout only.
+
+crun.python3 -p ~/envs/wrf-python python \
+    /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/check_channel_alignment.py \
+    --gc-nc     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/RAW_OUTPUTS/2014-2015/2014_01_01_2014_01_15/graphcast_2014_01_01_cropped.nc \
+    --base-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr
+
+
+------------------------------------------------------------------------------
+Case 2 — Full check against the packaged Zarr  (RECOMMENDED)
+------------------------------------------------------------------------------
+Adds per-channel data vs era5_center cross-check; this is the one that
+pinpoints mismatches.
+
+crun.python3 -p ~/envs/wrf-python python \
+    /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/check_channel_alignment.py \
+    --gc-nc         /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/RAW_OUTPUTS/2014-2015/2014_01_01_2014_01_15/graphcast_2014_01_01_cropped.nc \
+    --base-zarr     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr \
+    --packaged-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr
+
+
+------------------------------------------------------------------------------
+Case 3 — Full-resolution check using the verify-run NetCDF
+------------------------------------------------------------------------------
+Verify mode KEEPS the full-resolution file, so this is the only way to
+inspect uncropped predictions.
+
+crun.python3 -p ~/envs/wrf-python python \
+    /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/check_channel_alignment.py \
+    --gc-nc         /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_pipeline/GRAPHCAST_VERIFY_ROLLOUT1/verify_20240101/graphcast_2024_01_01.nc \
+    --base-zarr     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr \
+    --packaged-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr
+
+
+------------------------------------------------------------------------------
+Case 4 — Compare per-channel mean/std: base ERA5 Zarr vs packaged GraphCast Zarr
+------------------------------------------------------------------------------
+Definitive level-pairing check. Reduces era5(time, channel, y, x) to one
+mean and one std per channel on both stores, then reports per channel:
+    - direct match  (gc[i] looks like base[i])
+    - flipped match (gc[i] looks like base[mirror(i)] in the same var block)
+If level ordering is flipped, every pressure-level channel shows "flipped".
+
+crun.python3 -p ~/envs/wrf-python python \
+    /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/compare_channel_stats.py \
+    --base-zarr     /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/CORRDIFF/TRAINING/hampton_2007_2015_wpd_avg.zarr \
+    --packaged-zarr /raid/apaudel/AURORA-CORRDIFF-ARTIFACTS/DATASETS/GRAPHCAST/ZARR_FOR_CORRDIFF/graphcast_2014_2015.zarr
+
+
+------------------------------------------------------------------------------
+Custom output filename
+------------------------------------------------------------------------------
+crun.python3 -p ~/envs/wrf-python python \
+    /home/apaudel/PROJECTS/graphcast/graphcast_fork_ap/aces/graphcast_to_corrdiff_zarr/debug/check_channel_alignment.py \
+    --gc-nc <gc-nc-path> \
+    --base-zarr <base-zarr-path> \
+    --packaged-zarr <packaged-zarr-path> \
+    --output ~/reports/channel_alignment_2014_01_01.txt

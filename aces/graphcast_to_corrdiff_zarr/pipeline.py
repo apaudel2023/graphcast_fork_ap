@@ -159,42 +159,149 @@ def regrid_spatial(ds: xr.Dataset, base_path: Path, method: str, logger: logging
 
 
 # =============================================================
-# Variable extraction
+# Variable extraction (layout-driven, label-based; asserts everything)
 # =============================================================
-def select_pressure_levels(ds: xr.Dataset, cfg: dict, logger: logging.Logger) -> List[xr.DataArray]:
-    out = []
-    for v in cfg["var_era5_pressure"]:
-        name = v["name"]
-        if name not in ds:
-            logger.warning(f"Pressure variable missing: {name}")
-            continue
+def read_target_channel_layout(base_zarr_path: Path, logger: logging.Logger) -> List[dict]:
+    """Derive the canonical channel layout from the base CorrDiff Zarr.
+
+    Returns a list of length n_channels, where each entry is:
+        {"idx": <int>, "name": <str>, "pressure": <float hPa> or None}
+
+    Surface channels have pressure=None. Pressure-level channels carry the
+    real hPa value, so downstream selection can use label-based .sel(level=p)
+    and is immune to whatever order the GraphCast output happens to store
+    its `level` coord in.
+
+    The base Zarr is treated as the source of truth: the packaged Zarr's
+    channel i MUST hold the variable/pressure declared by the base Zarr at
+    channel i (because era5_center[i], era5_scale[i] are computed for that).
+    """
+    base = xr.open_zarr(base_zarr_path, consolidated=False)
+    try:
+        if "era5_variable" not in base.coords:
+            raise ValueError(
+                f"Base Zarr {base_zarr_path} is missing the 'era5_variable' coord — "
+                f"cannot derive a canonical channel layout."
+            )
+        vars_per_ch = [str(v) for v in base["era5_variable"].values]
+
+        if "era5_pressure" in base.coords:
+            press_raw = base["era5_pressure"].values
+        else:
+            logger.warning("Base Zarr has no 'era5_pressure' coord — assuming all surface.")
+            press_raw = [None] * len(vars_per_ch)
+
+        n = len(vars_per_ch)
+        assert len(press_raw) == n, (
+            f"era5_variable ({n}) and era5_pressure ({len(press_raw)}) length mismatch"
+        )
+
+        layout: List[dict] = []
+        for i, (vname, p) in enumerate(zip(vars_per_ch, press_raw)):
+            # Determine surface vs pressure-level from the pressure value:
+            # NaN / 0 / None → surface; any positive finite value → pressure-level.
+            is_surface = (
+                p is None
+                or (isinstance(p, float) and (np.isnan(p) or p <= 0))
+                or (hasattr(p, "item") and (np.isnan(float(p)) or float(p) <= 0))
+            )
+            layout.append({
+                "idx": i,
+                "name": vname,
+                "pressure": None if is_surface else float(p),
+            })
+    finally:
+        base.close()
+
+    logger.info(f"Target channel layout from base Zarr ({len(layout)} channels):")
+    for ch in layout:
+        if ch["pressure"] is None:
+            logger.info(f"  ch {ch['idx']:>3}: {ch['name']!r:<8} (surface)")
+        else:
+            logger.info(f"  ch {ch['idx']:>3}: {ch['name']!r:<8} @ {ch['pressure']:>6.1f} hPa")
+    return layout
+
+
+def select_channels_by_layout(
+    ds: xr.Dataset,
+    layout: List[dict],
+    logger: logging.Logger,
+) -> List[xr.DataArray]:
+    """Build per-channel DataArrays in the exact order of `layout`.
+
+    For each channel:
+      - Surface: requires `name` in ds, NO level dim. Assert both.
+      - Pressure-level: requires `name` in ds, requires a `level` (or
+        `bottom_top`) dim, and requires the target hPa value to be in
+        ds[name].<vdim>.values. Selection is LABEL-based.
+
+    All failures raise AssertionError with a clear message so the bug
+    cannot pass silently the way the old positional `isel` did.
+    """
+    available = set(ds.data_vars)
+    channels: List[xr.DataArray] = []
+
+    for ch in layout:
+        name = ch["name"]
+        p    = ch["pressure"]
+        idx  = ch["idx"]
+
+        assert name in available, (
+            f"Channel {idx} expects variable {name!r} but it is not in the GraphCast "
+            f"dataset. Available variables: {sorted(available)}"
+        )
         da = ds[name]
-        vdim = "level" if "level" in da.dims else ("bottom_top" if "bottom_top" in da.dims else None)
-        if vdim is None:
-            logger.warning(f"{name}: no vertical dim found, skipping")
-            continue
-        for lvl in v["pressure_levels"]:
-            if lvl >= da.sizes[vdim]:
-                logger.warning(f"{name}: level index {lvl} exceeds size {da.sizes[vdim]}")
-                continue
-            da_lvl = (da.isel({vdim: lvl})
-                        .transpose("time", "south_north", "west_east")
-                        .astype("float32"))
-            da_lvl.name = f"{name}_{lvl}"
-            out.append(da_lvl)
-    return out
 
+        # Spatial-dim sanity (applies to both surface and pressure-level)
+        for d in ("south_north", "west_east"):
+            assert d in da.dims, (
+                f"Channel {idx} ({name!r}): missing spatial dim {d!r}. "
+                f"Got dims: {da.dims}"
+            )
 
-def select_surface_vars(ds: xr.Dataset, cfg: dict, logger: logging.Logger) -> List[xr.DataArray]:
-    out = []
-    for name in cfg["var_era5_surface"]:
-        if name not in ds:
-            logger.warning(f"Surface variable missing: {name}")
-            continue
-        da = ds[name].transpose("time", "south_north", "west_east").astype("float32")
-        da.name = name
-        out.append(da)
-    return out
+        if p is None:
+            # ------------------------- Surface -------------------------
+            assert "level" not in da.dims and "bottom_top" not in da.dims, (
+                f"Channel {idx} ({name!r}): base Zarr declares this as surface, "
+                f"but GraphCast variable has a vertical dim. dims={da.dims}"
+            )
+            da_ch = da.transpose("time", "south_north", "west_east").astype("float32")
+            da_ch.name = name
+        else:
+            # ---------------------- Pressure level ---------------------
+            vdim = "level" if "level" in da.dims else ("bottom_top" if "bottom_top" in da.dims else None)
+            assert vdim is not None, (
+                f"Channel {idx} ({name!r} @ {p} hPa): no vertical dim found on variable. "
+                f"dims={da.dims}"
+            )
+            levels = np.asarray(da.coords[vdim].values)
+            target = float(p)
+            # Use a tolerant exact-match: GraphCast levels are int32 hPa values,
+            # base Zarr era5_pressure may be float. Compare with a tiny tolerance.
+            matches = np.where(np.isclose(levels.astype(float), target, atol=1e-3))[0]
+            assert matches.size == 1, (
+                f"Channel {idx} ({name!r} @ {target} hPa): expected exactly one "
+                f"matching level in dataset, found {matches.size}. "
+                f"Available levels: {sorted(levels.tolist())}"
+            )
+            # Label-based selection — order of `level` coord in `ds` does NOT matter.
+            da_ch = (
+                da.sel({vdim: levels[matches[0]]})
+                  .transpose("time", "south_north", "west_east")
+                  .astype("float32")
+            )
+            da_ch.name = f"{name}_{int(target)}hPa"
+
+        channels.append(da_ch)
+
+    assert len(channels) == len(layout), (
+        f"Built {len(channels)} channels but layout expects {len(layout)}"
+    )
+    logger.info(
+        f"Selected {len(channels)} channels by layout "
+        f"(label-based; first={channels[0].name!r}, last={channels[-1].name!r})"
+    )
+    return channels
 
 
 # =============================================================
@@ -203,6 +310,14 @@ def select_surface_vars(ds: xr.Dataset, cfg: dict, logger: logging.Logger) -> Li
 def build_clean_graphcast_dataset(cfg: dict, nc_files: List[Path], logger: logging.Logger) -> xr.Dataset:
     all_blocks, all_valid = [], []
     base_path = cfg["paths"]["base_zarr_path"]
+
+    # ----- Source of truth for channel layout: the base Zarr coords. -----
+    # This eliminates positional-isel level-flip bugs: we ALWAYS select by
+    # variable name + hPa label, never by index, and we always emit channels
+    # in the exact order the base Zarr's era5_center / era5_scale expect.
+    logger.info("Reading canonical channel layout from base Zarr ...")
+    layout = read_target_channel_layout(base_path, logger)
+    expected_n_channels = len(layout)
 
     for f in tqdm(nc_files, desc="[Reading GraphCast outputs]"):
         ds = None
@@ -216,8 +331,7 @@ def build_clean_graphcast_dataset(cfg: dict, nc_files: List[Path], logger: loggi
             elif cfg.get("resize", {}).get("enabled", False):
                 ds = resize_spatial(ds, cfg["resize"]["target_shape"])
 
-            chans = (select_pressure_levels(ds, cfg, logger)
-                     + select_surface_vars(ds, cfg, logger))
+            chans = select_channels_by_layout(ds, layout, logger)
 
             for i, da in enumerate(chans):
                 drop = [c for c in da.coords if c not in ("time", "south_north", "west_east")]
@@ -226,6 +340,11 @@ def build_clean_graphcast_dataset(cfg: dict, nc_files: List[Path], logger: loggi
             block = xr.concat(chans, dim="era5_channel",
                               coords="minimal", compat="override").astype("float32")
             block = block.transpose("time", "era5_channel", "south_north", "west_east")
+
+            assert block.sizes["era5_channel"] == expected_n_channels, (
+                f"{f.name}: built {block.sizes['era5_channel']} channels but base "
+                f"Zarr expects {expected_n_channels}"
+            )
 
             tvals = np.asarray(ds["time"].values).astype("datetime64[ns]")
             block = block.assign_coords(time=("time", tvals))
@@ -262,7 +381,15 @@ def build_clean_graphcast_dataset(cfg: dict, nc_files: List[Path], logger: loggi
     )
     ds_out["time"].attrs.clear()
     ds_out["time"].encoding.clear()
-    logger.info(f"Assembled GraphCast dataset: {dict(ds_out.sizes)}")
+
+    assert ds_out.sizes["era5_channel"] == expected_n_channels, (
+        f"Final dataset has {ds_out.sizes['era5_channel']} channels; "
+        f"base Zarr layout expects {expected_n_channels}"
+    )
+    logger.info(
+        f"Assembled GraphCast dataset: {dict(ds_out.sizes)} — channel layout "
+        f"matches base Zarr ({expected_n_channels} channels)."
+    )
     return ds_out
 
 
