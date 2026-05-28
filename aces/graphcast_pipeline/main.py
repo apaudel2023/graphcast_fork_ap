@@ -9,7 +9,7 @@ Usage:
     python main.py --config periods_job1.yml
 
     # Verification
-    python main.py --config verify_test.yml
+    python main.py --config test_graphcast.yml
 """
 
 import argparse

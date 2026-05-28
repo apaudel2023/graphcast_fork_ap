@@ -1,8 +1,8 @@
-# verify_test.yml — single forecast verification with analysis
+# test_graphcast.yml — single forecast verification with analysis
 #
 # Usage:
-#   sbatch submit.sh --config verify_test.yml
-#   python main.py --config verify_test.yml
+#   sbatch submit.sh --config test_graphcast.yml
+#   python main.py --config test_graphcast.yml
 
 run:
   mode: "verify"

@@ -117,7 +117,7 @@ Single forecast with ground truth comparison and optional analysis:
 - Generates crop preview showing global vs regional domain
 
 ```bash
-sbatch submit.sh --config verify_test.yml
+sbatch submit.sh --config test_graphcast.yml
 ```
 
 ---
@@ -140,7 +140,7 @@ aces/graphcast_pipeline/
     │   └── graphcast.yml    # Base configuration (paths, variables, crop, etc.)
     ├── periods_job1.yml     # Forecast periods for job 1
     ├── periods_job2.yml     # Forecast periods for job 2
-    └── verify_test.yml      # Verification config
+    └── test_graphcast.yml      # Verification config
 ```
 
 ---
@@ -171,7 +171,7 @@ run_periods:
 Override `run.mode`, `verification`, and `analysis`:
 
 ```yaml
-# verify_test.yml
+# test_graphcast.yml
 run:
   mode: "verify"
 
@@ -293,13 +293,13 @@ sbatch submit.sh --config periods_job1.yml --output-dir /raid/apaudel/test_run
 ### Run verification
 
 ```bash
-sbatch submit.sh --config verify_test.yml
+sbatch submit.sh --config test_graphcast.yml
 ```
 
 ### Run locally (no SLURM)
 
 ```bash
-python main.py --config verify_test.yml
+python main.py --config test_graphcast.yml
 python main.py --config periods_job1.yml --output-dir ./local_test
 ```
 
